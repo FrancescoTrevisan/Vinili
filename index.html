@@ -171,6 +171,10 @@
 <div class="header">
   <div class="logo">■ <span>vinili</span></div>
   <div class="header-right">
+    <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text3)">
+      <div id="sync-dot" style="width:7px;height:7px;border-radius:50%;background:var(--text3);transition:background 0.3s;flex-shrink:0"></div>
+      <span id="sync-label">Caricamento…</span>
+    </div>
     <button class="btn btn-icon" onclick="openExport()" title="Esporta">↓</button>
     <label class="btn btn-icon" style="cursor:pointer" title="Importa">↑<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label>
     <button class="btn btn-primary" onclick="openAdd()">+ Aggiungi</button>
@@ -242,6 +246,10 @@
 // ── Config ────────────────────────────────────────────────
 const API_BASE = 'https://vinili.vercel.app';
 const STORAGE_KEY = 'vinili_v1';
+const SB_URL = 'https://txvavajiavjjkgwrfdtw.supabase.co';
+const SB_KEY = 'sb_publishable_-szpEdr8zgR-8wiuciKrhw_qluaqy65';
+const SB_HEADERS = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY };
+const SB_ROW = 'default';
 
 // ── State ─────────────────────────────────────────────────
 let records = [];
@@ -249,9 +257,55 @@ let activeGenre = 'tutti';
 let searchTimeout = null;
 let codeReader = null;
 
+// ── Supabase ──────────────────────────────────────────────
+function setSyncStatus(state, label) {
+  const dot = document.getElementById('sync-dot');
+  const lbl = document.getElementById('sync-label');
+  const colors = { ok: '#1DB954', err: '#FF4D4D', loading: '#E0A040' };
+  if(dot) dot.style.background = colors[state] || '#606060';
+  if(lbl) lbl.textContent = label;
+}
+
+async function sbSave() {
+  setSyncStatus('loading', 'Salvataggio…');
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(records)); } catch(e){}
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/vinili`, {
+      method: 'POST',
+      headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify({ id: SB_ROW, data: records })
+    });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    setSyncStatus('ok', 'Sincronizzato');
+  } catch(e) {
+    setSyncStatus('err', 'Errore salvataggio');
+    toast('Errore salvataggio online. Dati salvati in locale.', 'error');
+  }
+}
+
+async function sbLoad() {
+  setSyncStatus('loading', 'Caricamento…');
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/vinili?id=eq.${SB_ROW}&select=data`, { headers: SB_HEADERS });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const rows = await r.json();
+    if(rows.length > 0 && rows[0].data && Array.isArray(rows[0].data) && rows[0].data.length > 0) {
+      records = rows[0].data;
+    } else {
+      const local = localStorage.getItem(STORAGE_KEY);
+      if(local) { records = JSON.parse(local); await sbSave(); }
+    }
+    setSyncStatus('ok', 'Sincronizzato');
+  } catch(e) {
+    setSyncStatus('err', 'Offline — dati locali');
+    toast('Impossibile connettersi. Uso dati locali.', 'error');
+    try { const local = localStorage.getItem(STORAGE_KEY); if(local) records = JSON.parse(local); } catch(e){}
+  }
+}
+
 // ── Storage ───────────────────────────────────────────────
-function save() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(records)); } catch(e){} }
-function load() { try { const r = localStorage.getItem(STORAGE_KEY); if(r) records = JSON.parse(r); } catch(e){} }
+function save() { sbSave(); }
+async function load() { await sbLoad(); }
 
 // ── Export / Import ───────────────────────────────────────
 function openExport() {
@@ -583,8 +637,10 @@ function stopScan() {
 }
 
 // ── Init ──────────────────────────────────────────────────
-load();
-renderAll();
+load().then(() => {
+  renderAll();
+  if(records.length > 0) toast(`${records.length} disc${records.length===1?'o':'hi'} caricati`, 'success');
+});
 </script>
 </body>
 </html>
