@@ -175,7 +175,9 @@
       <div id="sync-dot" style="width:7px;height:7px;border-radius:50%;background:var(--text3);transition:background 0.3s;flex-shrink:0"></div>
       <span id="sync-label">Caricamento…</span>
     </div>
-    <button class="btn btn-icon" onclick="openExport()" title="Esporta">↓</button>
+    <button class="btn btn-icon" onclick="updateAllPrices()" title="Aggiorna prezzi da Discogs" id="update-prices-btn">↻ Prezzi</button>
+    <button class="btn btn-icon" onclick="openExport()" title="Esporta JSON">↓ JSON</button>
+    <button class="btn btn-icon" onclick="exportCSV()" title="Esporta per Discogs">↓ CSV</button>
     <label class="btn btn-icon" style="cursor:pointer" title="Importa">↑<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label>
     <button class="btn btn-primary" onclick="openAdd()">+ Aggiungi</button>
   </div>
@@ -308,11 +310,77 @@ function save() { sbSave(); }
 async function load() { await sbLoad(); }
 
 // ── Export / Import ───────────────────────────────────────
+async function updateAllPrices() {
+  if(!records.length) { toast('Nessun disco in collezione', 'error'); return; }
+  const btn = document.getElementById('update-prices-btn');
+  const toUpdate = records.filter(r => r.discogsId);
+  if(!toUpdate.length) { toast('Nessun disco con ID Discogs trovato', 'error'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '↻ 0/' + toUpdate.length;
+
+  let updated = 0, failed = 0;
+  for (const record of toUpdate) {
+    try {
+      const r = await fetch(`${API_BASE}/api/discogs?releaseId=${record.discogsId}`);
+      if(!r.ok) throw new Error();
+      const data = await r.json();
+      const stats = data.market_stats;
+      if(stats) {
+        if(stats.lowest_price?.value) record.minPrice = Math.round(stats.lowest_price.value);
+        if(stats.highest_price?.value) record.maxPrice = Math.round(stats.highest_price.value);
+        else if(stats.median_price?.value) record.maxPrice = Math.round(stats.median_price.value);
+        if(stats.median_price?.value) record.marketValue = Math.round(stats.median_price.value);
+        else if(stats.lowest_price?.value) record.marketValue = Math.round(stats.lowest_price.value);
+        if(record.minPrice && !record.maxPrice) record.maxPrice = record.minPrice;
+        if(record.maxPrice && !record.minPrice) record.minPrice = record.maxPrice;
+      }
+      updated++;
+    } catch(e) { failed++; }
+    btn.textContent = '↻ ' + (updated + failed) + '/' + toUpdate.length;
+    await new Promise(res => setTimeout(res, 400)); // rispetta i rate limit Discogs
+  }
+
+  await sbSave();
+  renderAll();
+  btn.disabled = false;
+  btn.textContent = '↻ Prezzi';
+  toast(`Prezzi aggiornati: ${updated} ok${failed?' · '+failed+' errori':''}`, updated > 0 ? 'success' : 'error');
+}
+
 function openExport() {
   const blob = new Blob([JSON.stringify(records, null, 2)], {type:'application/json'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'vinili_' + new Date().toISOString().slice(0,10) + '.json';
   a.click(); URL.revokeObjectURL(a.href); toast('Collezione esportata', 'success');
+}
+
+function exportCSV() {
+  if(!records.length) { toast('Nessun disco da esportare', 'error'); return; }
+  const headers = ['Catalog#','Artist','Title','Label','Format','Rating','Year','Release ID','Collection Folder','Date Added','Collection Media Condition','Collection Sleeve Condition','Collection Notes'];
+  const rows = records.map(r => [
+    '',                                          // Catalog#
+    (r.artist || '').replace(/"/g, '""'),        // Artist
+    (r.title || '').replace(/"/g, '""'),         // Title
+    (r.label || '').replace(/"/g, '""'),         // Label
+    (r.format || 'Vinyl').replace(/"/g, '""'),   // Format
+    '',                                          // Rating
+    r.year || '',                                // Year
+    r.discogsId || '',                           // Release ID
+    'Uncategorized',                             // Collection Folder
+    r.addedAt ? r.addedAt.slice(0,10) : '',     // Date Added
+    (r.condition || '').replace(/"/g, '""'),     // Media Condition
+    '',                                          // Sleeve Condition
+    (r.notes || '').replace(/"/g, '""'),         // Notes
+  ].map(v => `"${v}"`).join(','));
+
+  const csv = [headers.join(','), ...rows].join('
+');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'vinili_discogs_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click(); URL.revokeObjectURL(a.href);
+  toast(`CSV esportato — ${records.length} dischi`, 'success');
 }
 function importData(e) {
   const file = e.target.files[0]; if(!file) return;
@@ -342,12 +410,33 @@ function toast(msg, type='success') {
 // ── Render ────────────────────────────────────────────────
 function renderStats() {
   const total = records.length;
-  const value = records.reduce((s,r) => s + (r.marketValue || 0), 0);
+  const withValue = records.filter(r => r.marketValue);
+  const totalMin = records.reduce((s,r) => s + (r.minPrice || r.marketValue || 0), 0);
+  const totalMax = records.reduce((s,r) => s + (r.maxPrice || r.marketValue || 0), 0);
+  const totalMed = records.reduce((s,r) => s + (r.marketValue || 0), 0);
   const genres = new Set(records.flatMap(r=>r.genres||[]));
+  const hasRange = totalMin !== totalMax && (totalMin > 0 || totalMax > 0);
   document.getElementById('stats-bar').innerHTML = `
-    <div class="stat-item"><div class="stat-num">${total}</div><div class="stat-label">Dischi</div></div>
-    <div class="stat-item"><div class="stat-num" style="color:var(--green)">€${value.toLocaleString('it-IT',{maximumFractionDigits:0})}</div><div class="stat-label">Valore stimato</div></div>
-    <div class="stat-item"><div class="stat-num">${genres.size}</div><div class="stat-label">Generi</div></div>`;
+    <div class="stat-item">
+      <div class="stat-num">${total}</div>
+      <div class="stat-label">Dischi</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num" style="color:var(--green)">€${totalMed.toLocaleString('it-IT',{maximumFractionDigits:0})}</div>
+      <div class="stat-label">Valore stimato</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num" style="font-size:16px">
+        <span style="color:var(--text2)">€${totalMin.toLocaleString('it-IT',{maximumFractionDigits:0})}</span>
+        <span style="color:var(--text3);font-size:13px;margin:0 4px">→</span>
+        <span style="color:#FFD700">€${totalMax.toLocaleString('it-IT',{maximumFractionDigits:0})}</span>
+      </div>
+      <div class="stat-label">Range valore totale</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">${genres.size}</div>
+      <div class="stat-label">Generi</div>
+    </div>`;
 }
 
 function renderFilters() {
@@ -426,7 +515,17 @@ function openRecord(id) {
     </div>
     <div class="modal-stats">
       <div class="modal-stat"><div class="modal-stat-val">${r.year || '—'}</div><div class="modal-stat-label">Anno</div></div>
-      <div class="modal-stat"><div class="modal-stat-val" style="color:var(--green)">${r.marketValue ? '€'+r.marketValue : '—'}</div><div class="modal-stat-label">Valore</div></div>
+      <div class="modal-stat">
+        <div class="modal-stat-val" style="color:var(--green)">${r.marketValue ? '€'+r.marketValue : '—'}</div>
+        <div class="modal-stat-label">Valore medio</div>
+      </div>
+      ${(r.minPrice||r.maxPrice) ? `<div class="modal-stat" style="grid-column:span 2">
+        <div style="display:flex;justify-content:space-around;align-items:center">
+          <div style="text-align:center"><div style="font-size:16px;font-weight:700;color:var(--text2)">€${r.minPrice||'—'}</div><div class="modal-stat-label">Min mercato</div></div>
+          <div style="color:var(--text3)">→</div>
+          <div style="text-align:center"><div style="font-size:16px;font-weight:700;color:#FFD700">€${r.maxPrice||'—'}</div><div class="modal-stat-label">Max mercato</div></div>
+        </div>
+      </div>` : ''}
       <div class="modal-stat"><div class="modal-stat-val">${r.condition || '—'}</div><div class="modal-stat-label">Condizione</div></div>
     </div>
 
@@ -569,10 +668,19 @@ function buildRecord(detail, preview) {
   const artist = titleParts.length > 1 ? titleParts[0] : (preview.artist||preview.title||'');
   const title = titleParts.length > 1 ? titleParts.slice(1).join(' - ') : (preview.title||'');
 
-  let marketValue = null;
+  let marketValue = null, minPrice = null, maxPrice = null;
   const stats = detail?.market_stats || preview.market_stats;
-  if (stats?.lowest_price?.value) marketValue = Math.round(stats.lowest_price.value);
-  else if (stats?.median_price?.value) marketValue = Math.round(stats.median_price.value);
+  if (stats) {
+    if (stats.lowest_price?.value) minPrice = Math.round(stats.lowest_price.value);
+    if (stats.highest_price?.value) maxPrice = Math.round(stats.highest_price.value);
+    else if (stats.median_price?.value) maxPrice = Math.round(stats.median_price.value);
+    // marketValue = median, fallback to lowest
+    if (stats.median_price?.value) marketValue = Math.round(stats.median_price.value);
+    else if (stats.lowest_price?.value) marketValue = Math.round(stats.lowest_price.value);
+    // if only one price available use it for all
+    if (minPrice && !maxPrice) maxPrice = minPrice;
+    if (maxPrice && !minPrice) minPrice = maxPrice;
+  }
 
   return {
     id: Date.now().toString(),
@@ -587,6 +695,8 @@ function buildRecord(detail, preview) {
     format: detail?.formats?.[0]?.name || (preview.format?.[0]),
     tracklist: detail?.tracklist || [],
     marketValue,
+    minPrice,
+    maxPrice,
     condition: '',
     notes: '',
     description: '',
