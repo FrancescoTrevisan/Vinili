@@ -165,6 +165,20 @@
     <input type="text" id="search-input" placeholder="Cerca artista, titolo&hellip;" oninput="renderGrid()">
   </div>
   <div class="filter-chips" id="genre-filters"></div>
+  <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+    <span style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em">Ordina</span>
+    <select id="sort-select" onchange="setSort(this.value)" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:13px;padding:6px 10px;font-family:inherit;cursor:pointer">
+      <option value="recente">Recente</option>
+      <option value="alpha-az">A &rarr; Z</option>
+      <option value="alpha-za">Z &rarr; A</option>
+      <option value="artista-az">Artista A &rarr; Z</option>
+      <option value="artista-za">Artista Z &rarr; A</option>
+      <option value="anno-asc">Anno &uarr;</option>
+      <option value="anno-desc">Anno &darr;</option>
+      <option value="prezzo-asc">Prezzo &uarr;</option>
+      <option value="prezzo-desc">Prezzo &darr;</option>
+    </select>
+  </div>
 </div>
 
 <div class="grid-wrap">
@@ -225,6 +239,7 @@ var activeGenre = 'tutti';
 var searchTimeout = null;
 var codeReader = null;
 var searchResultsMap = {};
+var currentSort = 'recente';
 
 function sbHeaders() {
   return {
@@ -368,8 +383,7 @@ async function updateAllPrices() {
       var stats = data.market_stats;
       if (stats) {
         if (stats.lowest_price && stats.lowest_price.value) record.minPrice = Math.round(stats.lowest_price.value);
-        if (stats.highest_price && stats.highest_price.value) record.maxPrice = Math.round(stats.highest_price.value);
-        else if (stats.median_price && stats.median_price.value) record.maxPrice = Math.round(stats.median_price.value);
+        if (stats.median_price && stats.median_price.value) record.maxPrice = Math.round(stats.median_price.value);
         if (stats.median_price && stats.median_price.value) record.marketValue = Math.round(stats.median_price.value);
         else if (stats.lowest_price && stats.lowest_price.value) record.marketValue = Math.round(stats.lowest_price.value);
         if (record.minPrice && !record.maxPrice) record.maxPrice = record.minPrice;
@@ -396,7 +410,7 @@ function renderStats() {
   document.getElementById('stats-bar').innerHTML =
     '<div class="stat-item"><div class="stat-num">' + total + '</div><div class="stat-label">Dischi</div></div>' +
     '<div class="stat-item"><div class="stat-num" style="color:var(--green)">&euro;' + totalMed.toLocaleString('it-IT', {maximumFractionDigits:0}) + '</div><div class="stat-label">Valore stimato</div></div>' +
-    '<div class="stat-item"><div class="stat-num" style="font-size:16px"><span style="color:var(--text2)">&euro;' + totalMin.toLocaleString('it-IT', {maximumFractionDigits:0}) + '</span><span style="color:var(--text3);margin:0 6px">&rarr;</span><span style="color:var(--gold)">&euro;' + totalMax.toLocaleString('it-IT', {maximumFractionDigits:0}) + '</span></div><div class="stat-label">Range totale</div></div>' +
+    '<div class="stat-item"><div class="stat-num" style="font-size:16px"><span style="color:var(--text2)">&euro;' + totalMin.toLocaleString('it-IT', {maximumFractionDigits:0}) + '</span><span style="color:var(--text3);margin:0 6px">&rarr;</span><span style="color:var(--gold)">&euro;' + totalMax.toLocaleString('it-IT', {maximumFractionDigits:0}) + '</span></div><div class="stat-label">Lowest &rarr; Median</div></div>' +
     '<div class="stat-item"><div class="stat-num">' + genres.size + '</div><div class="stat-label">Generi</div></div>';
 }
 
@@ -412,13 +426,31 @@ function renderFilters() {
 
 function setGenre(g) { activeGenre = g; renderFilters(); renderGrid(); }
 
+function setSort(s) { currentSort = s; renderGrid(); }
+
+function sortRecords(list) {
+  var sorted = list.slice();
+  switch (currentSort) {
+    case 'alpha-az':   return sorted.sort(function(a,b){ return (a.title||'').localeCompare(b.title||'','it'); });
+    case 'alpha-za':   return sorted.sort(function(a,b){ return (b.title||'').localeCompare(a.title||'','it'); });
+    case 'artista-az': return sorted.sort(function(a,b){ return (a.artist||'').localeCompare(b.artist||'','it'); });
+    case 'artista-za': return sorted.sort(function(a,b){ return (b.artist||'').localeCompare(a.artist||'','it'); });
+    case 'anno-asc':   return sorted.sort(function(a,b){ return (a.year||0) - (b.year||0); });
+    case 'anno-desc':  return sorted.sort(function(a,b){ return (b.year||0) - (a.year||0); });
+    case 'prezzo-asc': return sorted.sort(function(a,b){ return (a.marketValue||0) - (b.marketValue||0); });
+    case 'prezzo-desc':return sorted.sort(function(a,b){ return (b.marketValue||0) - (a.marketValue||0); });
+    default:           return sorted; // recente = ordine inserimento
+  }
+}
+
 function renderGrid() {
   var q = document.getElementById('search-input').value.toLowerCase();
-  var list = records.filter(function(r) {
+  var filtered = records.filter(function(r) {
     var matchGenre = activeGenre === 'tutti' || (r.genres || []).indexOf(activeGenre) >= 0;
     var matchSearch = !q || (r.title || '').toLowerCase().indexOf(q) >= 0 || (r.artist || '').toLowerCase().indexOf(q) >= 0;
     return matchGenre && matchSearch;
   });
+  var list = sortRecords(filtered);
   var el = document.getElementById('vinyl-grid');
   if (!list.length) {
     el.innerHTML = '<div class="empty-state"><div class="icon">&#127925;</div><h3>' + (records.length ? 'Nessun risultato' : 'Collezione vuota') + '</h3><p>' + (records.length ? 'Prova a cambiare filtri' : 'Aggiungi il tuo primo disco') + '</p></div>';
@@ -450,9 +482,9 @@ function openRecord(id) {
   var priceRangeHTML = '';
   if (r.minPrice || r.maxPrice) {
     priceRangeHTML = '<div class="price-range-box">' +
-      '<div class="price-range-item"><div class="price-range-val" style="color:var(--text2)">&euro;' + (r.minPrice || '&mdash;') + '</div><div class="price-range-label">Min mercato</div></div>' +
+      '<div class="price-range-item"><div class="price-range-val" style="color:var(--text2)">&euro;' + (r.minPrice || '&mdash;') + '</div><div class="price-range-label">Lowest</div></div>' +
       '<div class="price-range-arrow">&rarr;</div>' +
-      '<div class="price-range-item"><div class="price-range-val" style="color:var(--gold)">&euro;' + (r.maxPrice || '&mdash;') + '</div><div class="price-range-label">Max mercato</div></div>' +
+      '<div class="price-range-item"><div class="price-range-val" style="color:var(--gold)">&euro;' + (r.maxPrice || '&mdash;') + '</div><div class="price-range-label">Median</div></div>' +
       '</div>';
   }
   var tracklistHTML = '';
@@ -590,8 +622,8 @@ function buildRecord(detail, preview) {
   var stats = (detail && detail.market_stats) || (preview && preview.market_stats);
   if (stats) {
     if (stats.lowest_price && stats.lowest_price.value) minPrice = Math.round(stats.lowest_price.value);
-    if (stats.highest_price && stats.highest_price.value) maxPrice = Math.round(stats.highest_price.value);
-    else if (stats.median_price && stats.median_price.value) maxPrice = Math.round(stats.median_price.value);
+    if (stats.median_price && stats.median_price.value) maxPrice = Math.round(stats.median_price.value);
+    // marketValue = median, fallback lowest
     if (stats.median_price && stats.median_price.value) marketValue = Math.round(stats.median_price.value);
     else if (stats.lowest_price && stats.lowest_price.value) marketValue = Math.round(stats.lowest_price.value);
     if (minPrice && !maxPrice) maxPrice = minPrice;
