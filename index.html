@@ -1,63 +1,682 @@
-const r = await fetch(`${API_BASE}/api/discogs?query=${encodeURIComponent(q)}`);
-const data = await r.json();
-if(!data.results?.length){ el.innerHTML='<p style="color:var(--text3);font-size:13px;padding:8px">Nessun risultato</p>'; return; }
-      // Store results for safe access
-      window._searchResults = {};
-      data.results.forEach(item => { window._searchResults[item.id] = item; });
-el.innerHTML = '<div class="search-results">' + data.results.map(item => `
-        <div class="result-item" onclick="selectResult(${item.id}, '${encodeURIComponent(JSON.stringify(item))}')">
-        <div class="result-item" onclick="selectResult(${item.id})">
-         ${item.cover_image ? `<img class="result-thumb" src="${item.cover_image}" onerror="this.style.display='none'">` : '<div class="result-thumb" style="background:var(--surface3);display:flex;align-items:center;justify-content:center">🎵</div>'}
-         <div class="result-info">
-           <div class="result-title">${item.title}</div>
-@@ -534,21 +537,30 @@ <h3>${records.length ? 'Nessun risultato' : 'Collezione vuota'}</h3>
-}, 500);
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>La mia collezione</title>
+<style>
+  :root {
+    --bg: #0A0A0A; --surface: #141414; --surface2: #1E1E1E; --surface3: #282828;
+    --border: rgba(255,255,255,0.08); --border2: rgba(255,255,255,0.15);
+    --text: #FFFFFF; --text2: #A0A0A0; --text3: #606060;
+    --accent: #FF4D4D; --accent2: #FF8080; --green: #1DB954; --gold: #FFD700;
+    --radius: 8px; --radius-lg: 16px; --radius-xl: 24px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+  .header { padding: 1.5rem 1.5rem 0; display: flex; align-items: center; justify-content: space-between; max-width: 1200px; margin: 0 auto; flex-wrap: wrap; gap: 10px; }
+  .logo { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+  .logo span { color: var(--accent); }
+  .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sync-wrap { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text3); }
+  .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); transition: background 0.3s; flex-shrink: 0; }
+  .stats-bar { max-width: 1200px; margin: 1.5rem auto 0; padding: 0 1.5rem; display: flex; gap: 2rem; flex-wrap: wrap; }
+  .stat-item { display: flex; flex-direction: column; gap: 2px; }
+  .stat-num { font-size: 22px; font-weight: 700; }
+  .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; }
+  .controls { max-width: 1200px; margin: 1.5rem auto 0; padding: 0 1.5rem; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .search-wrap { position: relative; flex: 1; min-width: 200px; }
+  .search-wrap input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 14px; padding: 10px 14px 10px 38px; font-family: inherit; }
+  .search-wrap input:focus { outline: none; border-color: var(--border2); }
+  .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text3); pointer-events: none; }
+  .filter-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 99px; padding: 6px 14px; font-size: 12px; color: var(--text2); cursor: pointer; transition: all 0.15s; font-family: inherit; }
+  .chip:hover { border-color: var(--border2); color: var(--text); }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: white; }
+  .grid-wrap { max-width: 1200px; margin: 1.5rem auto; padding: 0 1.5rem; }
+  .vinyl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 20px; }
+  @media(max-width:480px){ .vinyl-grid { grid-template-columns: repeat(2,1fr); gap: 14px; } }
+  .vinyl-card { cursor: pointer; }
+  .cover-wrap { position: relative; aspect-ratio: 1; border-radius: var(--radius); overflow: hidden; background: var(--surface2); margin-bottom: 10px; }
+  .cover-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.3s ease; }
+  .vinyl-card:hover .cover-wrap img { transform: scale(1.04); }
+  .cover-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 48px; background: var(--surface3); }
+  .cover-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); opacity: 0; transition: opacity 0.2s; display: flex; align-items: center; justify-content: center; }
+  .vinyl-card:hover .cover-overlay { opacity: 1; }
+  .play-icon { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.3; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-artist { font-size: 12px; color: var(--text2); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-meta { display: flex; align-items: center; justify-content: space-between; }
+  .card-year { font-size: 11px; color: var(--text3); }
+  .card-value { font-size: 12px; font-weight: 600; color: var(--green); }
+  .btn { font-family: inherit; font-size: 13px; padding: 9px 18px; border-radius: var(--radius); cursor: pointer; display: inline-flex; align-items: center; gap: 7px; border: 1px solid; transition: all 0.15s; font-weight: 500; }
+  .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn-primary:hover { opacity: 0.88; }
+  .btn-ghost { background: transparent; color: var(--text2); border-color: var(--border2); }
+  .btn-ghost:hover { background: var(--surface2); color: var(--text); }
+  .btn-icon { background: var(--surface2); color: var(--text2); border-color: var(--border); padding: 9px 12px; font-size: 12px; }
+  .btn-icon:hover { background: var(--surface3); color: var(--text); }
+  .btn-icon:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-sm { font-size: 12px; padding: 6px 12px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; display: flex; align-items: flex-end; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
+  @media(min-width:600px){ .modal-overlay { align-items: center; padding: 2rem; } }
+  .modal { background: var(--surface); border-radius: var(--radius-xl) var(--radius-xl) 0 0; width: 100%; max-width: 680px; max-height: 90vh; overflow-y: auto; padding: 1.5rem; transform: translateY(40px); transition: transform 0.25s ease; }
+  .modal-overlay.open .modal { transform: translateY(0); }
+  @media(min-width:600px){ .modal { border-radius: var(--radius-xl); } }
+  .modal-header { display: flex; gap: 1rem; margin-bottom: 1.25rem; }
+  .modal-cover { width: 100px; height: 100px; border-radius: var(--radius); overflow: hidden; flex-shrink: 0; background: var(--surface2); }
+  .modal-cover img { width: 100%; height: 100%; object-fit: cover; }
+  .modal-cover-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 36px; }
+  .modal-info { flex: 1; min-width: 0; }
+  .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; line-height: 1.3; }
+  .modal-artist { font-size: 14px; color: var(--text2); margin-bottom: 10px; }
+  .modal-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag { background: var(--surface3); border-radius: 6px; padding: 3px 10px; font-size: 11px; color: var(--text2); }
+  .modal-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 1.25rem; }
+  .modal-stat { background: var(--surface2); border-radius: var(--radius); padding: 12px; text-align: center; }
+  .modal-stat-val { font-size: 18px; font-weight: 700; margin-bottom: 2px; }
+  .modal-stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; }
+  .price-range-box { background: var(--surface2); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-around; gap: 1rem; }
+  .price-range-item { text-align: center; }
+  .price-range-val { font-size: 18px; font-weight: 700; }
+  .price-range-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+  .price-range-arrow { color: var(--text3); font-size: 18px; }
+  .section-title { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; margin-top: 1.25rem; }
+  .tracklist { display: flex; flex-direction: column; gap: 2px; }
+  .track { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: var(--radius); transition: background 0.15s; }
+  .track:hover { background: var(--surface2); }
+  .track-pos { font-size: 12px; color: var(--text3); width: 24px; text-align: center; flex-shrink: 0; }
+  .track-title { font-size: 13px; flex: 1; }
+  .track-dur { font-size: 12px; color: var(--text3); }
+  .description { font-size: 13px; color: var(--text2); line-height: 1.7; background: var(--surface2); border-radius: var(--radius); padding: 14px; }
+  .condition-select { background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); color: var(--text); font-size: 13px; padding: 8px 12px; font-family: inherit; width: 100%; }
+  .notes-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 13px; padding: 10px 12px; font-family: inherit; resize: vertical; min-height: 72px; margin-top: 8px; }
+  .notes-input:focus { outline: none; border-color: var(--border2); }
+  .add-panel { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: flex; align-items: flex-end; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+  .add-panel.open { opacity: 1; pointer-events: all; }
+  .add-box { background: var(--surface); border-radius: var(--radius-xl) var(--radius-xl) 0 0; width: 100%; max-width: 520px; padding: 1.5rem; transform: translateY(40px); transition: transform 0.25s ease; max-height: 90vh; overflow-y: auto; }
+  .add-panel.open .add-box { transform: translateY(0); }
+  @media(min-width:600px){ .add-panel { align-items: center; } .add-box { border-radius: var(--radius-xl); } }
+  .add-title { font-size: 17px; font-weight: 700; margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-between; }
+  .add-methods { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1rem; }
+  .add-method { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1rem; cursor: pointer; text-align: center; transition: all 0.15s; }
+  .add-method:hover { border-color: var(--border2); background: var(--surface3); }
+  .add-method.active { border-color: var(--accent); background: rgba(255,77,77,0.08); }
+  .add-method-icon { font-size: 28px; margin-bottom: 6px; }
+  .add-method-label { font-size: 13px; font-weight: 500; }
+  .add-method-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  .search-input-add { width: 100%; background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); color: var(--text); font-size: 14px; padding: 10px 14px; font-family: inherit; }
+  .search-input-add:focus { outline: none; border-color: var(--accent); }
+  .search-results-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; max-height: 300px; overflow-y: auto; }
+  .result-item { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--surface2); border-radius: var(--radius); cursor: pointer; border: 1px solid transparent; transition: all 0.15s; }
+  .result-item:hover { border-color: var(--accent); }
+  .result-thumb { width: 44px; height: 44px; border-radius: 4px; object-fit: cover; background: var(--surface3); flex-shrink: 0; }
+  .result-info { flex: 1; min-width: 0; }
+  .result-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .result-sub { font-size: 11px; color: var(--text3); }
+  .scan-area { background: var(--surface2); border: 2px dashed var(--border2); border-radius: var(--radius-lg); padding: 2rem; text-align: center; margin-top: 10px; }
+  .scan-area p { font-size: 13px; color: var(--text2); margin-top: 8px; }
+  video { width: 100%; border-radius: var(--radius); display: none; }
+  video.active { display: block; }
+  .toasts { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .toast { background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 10px 16px; font-size: 13px; color: var(--text); display: flex; align-items: center; gap: 8px; animation: slideIn 0.2s ease; max-width: 280px; }
+  .toast.success { border-left: 3px solid var(--green); }
+  .toast.error { border-left: 3px solid var(--accent); }
+  @keyframes slideIn { from{opacity:0;transform:translateX(16px)} to{opacity:1;transform:none} }
+  .spinner { width: 16px; height: 16px; border: 2px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  .loading-state { display: flex; align-items: center; gap: 10px; color: var(--text2); font-size: 13px; padding: 1rem 0; }
+  .empty-state { text-align: center; padding: 5rem 2rem; color: var(--text3); grid-column: 1/-1; }
+  .empty-state .icon { font-size: 56px; margin-bottom: 1rem; }
+  .empty-state h3 { font-size: 18px; color: var(--text2); margin-bottom: 8px; }
+  .empty-state p { font-size: 14px; line-height: 1.6; }
+  .drag-handle { width: 36px; height: 4px; background: var(--surface3); border-radius: 2px; margin: 0 auto 1.25rem; }
+  .close-btn { background: var(--surface2); border: none; color: var(--text2); width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .close-btn:hover { background: var(--surface3); color: var(--text); }
+  .modal-top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; }
+  .modal-top-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; }
+</style>
+</head>
+<body>
+
+<div class="toasts" id="toasts"></div>
+
+<div class="header">
+  <div class="logo">&#9632; <span>vinili</span></div>
+  <div class="header-right">
+    <div class="sync-wrap">
+      <div class="sync-dot" id="sync-dot"></div>
+      <span id="sync-label">Caricamento</span>
+    </div>
+    <button class="btn btn-icon" id="update-prices-btn" onclick="updateAllPrices()">&#8635; Prezzi</button>
+    <button class="btn btn-icon" onclick="openExport()">&#8595; JSON</button>
+    <button class="btn btn-icon" onclick="exportCSV()">&#8595; CSV</button>
+    <label class="btn btn-icon" style="cursor:pointer">&#8593; Importa<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label>
+    <button class="btn btn-primary" onclick="openAdd()">+ Aggiungi</button>
+  </div>
+</div>
+
+<div class="stats-bar" id="stats-bar"></div>
+
+<div class="controls">
+  <div class="search-wrap">
+    <span class="search-icon">&#9740;</span>
+    <input type="text" id="search-input" placeholder="Cerca artista, titolo&hellip;" oninput="renderGrid()">
+  </div>
+  <div class="filter-chips" id="genre-filters"></div>
+</div>
+
+<div class="grid-wrap">
+  <div class="vinyl-grid" id="vinyl-grid"></div>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="handleModalClick(event)">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<!-- Add Panel -->
+<div class="add-panel" id="add-panel" onclick="handleAddClick(event)">
+  <div class="add-box" id="add-box">
+    <div class="drag-handle"></div>
+    <div class="add-title">
+      <span>Aggiungi disco</span>
+      <button class="close-btn" onclick="closeAddPanel()">&#10005;</button>
+    </div>
+    <div class="add-methods">
+      <div class="add-method active" id="method-search" onclick="setMethod('search')">
+        <div class="add-method-icon">&#128269;</div>
+        <div class="add-method-label">Cerca</div>
+        <div class="add-method-sub">Artista o titolo</div>
+      </div>
+      <div class="add-method" id="method-scan" onclick="setMethod('scan')">
+        <div class="add-method-icon">&#128247;</div>
+        <div class="add-method-label">Scansiona</div>
+        <div class="add-method-sub">Codice a barre</div>
+      </div>
+    </div>
+    <div id="method-search-ui">
+      <input type="text" id="add-search" class="search-input-add" placeholder="es. Kind of Blue, Miles Davis&hellip;" oninput="searchDiscogs(this.value)">
+      <div id="search-results"></div>
+    </div>
+    <div id="method-scan-ui" style="display:none">
+      <div class="scan-area">
+        <div style="font-size:36px">&#128247;</div>
+        <p>Inquadra il codice a barre del vinile</p>
+        <video id="scanner-video" playsinline></video>
+        <button class="btn btn-ghost" style="margin-top:12px" id="scan-btn" onclick="startScan()">Avvia fotocamera</button>
+      </div>
+      <div id="scan-results"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
+<script>
+var API_BASE = 'https://vinili.vercel.app';
+var STORAGE_KEY = 'vinili_v1';
+var SB_URL = 'https://txvavajiavjjkgwrfdtw.supabase.co';
+var SB_KEY = 'sb_publishable_-szpEdr8zgR-8wiuciKrhw_qluaqy65';
+var SB_ROW = 'default';
+
+var records = [];
+var activeGenre = 'tutti';
+var searchTimeout = null;
+var codeReader = null;
+var searchResultsMap = {};
+
+function sbHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'apikey': SB_KEY,
+    'Authorization': 'Bearer ' + SB_KEY
+  };
 }
 
-async function selectResult(discogsId, itemJson) {
-  const preview = JSON.parse(decodeURIComponent(itemJson));
-  const el = document.getElementById('search-results');
-  el.innerHTML = '<div class="loading-state"><div class="spinner"></div> Carico i dettagli…</div>';
+function setSyncStatus(state, label) {
+  var dot = document.getElementById('sync-dot');
+  var lbl = document.getElementById('sync-label');
+  var colors = { ok: '#1DB954', err: '#FF4D4D', loading: '#E0A040' };
+  if (dot) dot.style.background = colors[state] || '#606060';
+  if (lbl) lbl.textContent = label;
+}
+
+async function sbSave() {
+  setSyncStatus('loading', 'Salvataggio...');
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(records)); } catch(e) {}
+  try {
+    var r = await fetch(SB_URL + '/rest/v1/vinili', {
+      method: 'POST',
+      headers: Object.assign({}, sbHeaders(), { 'Prefer': 'resolution=merge-duplicates' }),
+      body: JSON.stringify({ id: SB_ROW, data: records })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    setSyncStatus('ok', 'Sincronizzato');
+  } catch(e) {
+    setSyncStatus('err', 'Errore salvataggio');
+    toast('Errore salvataggio online. Dati salvati in locale.', 'error');
+  }
+}
+
+async function sbLoad() {
+  setSyncStatus('loading', 'Caricamento...');
+  try {
+    var r = await fetch(SB_URL + '/rest/v1/vinili?id=eq.' + SB_ROW + '&select=data', { headers: sbHeaders() });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var rows = await r.json();
+    if (rows.length > 0 && rows[0].data && Array.isArray(rows[0].data) && rows[0].data.length > 0) {
+      records = rows[0].data;
+    } else {
+      var local = localStorage.getItem(STORAGE_KEY);
+      if (local) { records = JSON.parse(local); await sbSave(); }
+    }
+    setSyncStatus('ok', 'Sincronizzato');
+  } catch(e) {
+    setSyncStatus('err', 'Offline');
+    try { var local = localStorage.getItem(STORAGE_KEY); if (local) records = JSON.parse(local); } catch(e2) {}
+  }
+}
+
+function toast(msg, type) {
+  type = type || 'success';
+  var wrap = document.getElementById('toasts');
+  var el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(function() {
+    el.style.opacity = '0';
+    el.style.transition = 'opacity 0.3s';
+    setTimeout(function() { el.remove(); }, 300);
+  }, 3000);
+}
+
+function openExport() {
+  var blob = new Blob([JSON.stringify(records, null, 2)], { type: 'application/json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'vinili_' + new Date().toISOString().slice(0, 10) + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Collezione esportata');
+}
+
+function exportCSV() {
+  if (!records.length) { toast('Nessun disco da esportare', 'error'); return; }
+  var headers = ['Catalog#','Artist','Title','Label','Format','Rating','Year','Release ID','Collection Folder','Date Added','Collection Media Condition','Collection Sleeve Condition','Collection Notes'];
+  var rows = records.map(function(r) {
+    return [
+      '',
+      (r.artist || '').replace(/"/g, '""'),
+      (r.title || '').replace(/"/g, '""'),
+      (r.label || '').replace(/"/g, '""'),
+      (r.format || 'Vinyl').replace(/"/g, '""'),
+      '',
+      r.year || '',
+      r.discogsId || '',
+      'Uncategorized',
+      r.addedAt ? r.addedAt.slice(0, 10) : '',
+      (r.condition || '').replace(/"/g, '""'),
+      '',
+      (r.notes || '').replace(/"/g, '""')
+    ].map(function(v) { return '"' + v + '"'; }).join(',');
+  });
+  var csv = [headers.join(',')].concat(rows).join('\n');
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'vinili_discogs_' + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('CSV esportato — ' + records.length + ' dischi');
+}
+
+function importData(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = async function(ev) {
+    try {
+      var data = JSON.parse(ev.target.result);
+      if (!Array.isArray(data)) throw new Error();
+      var ids = new Set(records.map(function(r) { return r.id; }));
+      var nuovi = data.filter(function(r) { return !ids.has(r.id); });
+      records = records.concat(nuovi);
+      await sbSave();
+      renderAll();
+      toast(nuovi.length + ' dischi importati');
+    } catch(err) { toast('File non valido', 'error'); }
+    e.target.value = '';
+  };
+  reader.readAsText(file);
+}
+
+async function updateAllPrices() {
+  var btn = document.getElementById('update-prices-btn');
+  var toUpdate = records.filter(function(r) { return r.discogsId; });
+  if (!toUpdate.length) { toast('Nessun disco con ID Discogs', 'error'); return; }
+  btn.disabled = true;
+  var updated = 0, failed = 0;
+  btn.textContent = '0/' + toUpdate.length;
+  for (var i = 0; i < toUpdate.length; i++) {
+    var record = toUpdate[i];
+    try {
+      var r = await fetch(API_BASE + '/api/discogs?releaseId=' + record.discogsId);
+      if (!r.ok) throw new Error();
+      var data = await r.json();
+      var stats = data.market_stats;
+      if (stats) {
+        if (stats.lowest_price && stats.lowest_price.value) record.minPrice = Math.round(stats.lowest_price.value);
+        if (stats.highest_price && stats.highest_price.value) record.maxPrice = Math.round(stats.highest_price.value);
+        else if (stats.median_price && stats.median_price.value) record.maxPrice = Math.round(stats.median_price.value);
+        if (stats.median_price && stats.median_price.value) record.marketValue = Math.round(stats.median_price.value);
+        else if (stats.lowest_price && stats.lowest_price.value) record.marketValue = Math.round(stats.lowest_price.value);
+        if (record.minPrice && !record.maxPrice) record.maxPrice = record.minPrice;
+        if (record.maxPrice && !record.minPrice) record.minPrice = record.maxPrice;
+      }
+      updated++;
+    } catch(err) { failed++; }
+    btn.textContent = (updated + failed) + '/' + toUpdate.length;
+    await new Promise(function(res) { setTimeout(res, 400); });
+  }
+  await sbSave();
+  renderAll();
+  btn.disabled = false;
+  btn.textContent = '\u8635 Prezzi';
+  toast('Aggiornati: ' + updated + (failed ? ' · ' + failed + ' errori' : ''), updated > 0 ? 'success' : 'error');
+}
+
+function renderStats() {
+  var total = records.length;
+  var totalMin = records.reduce(function(s, r) { return s + (r.minPrice || r.marketValue || 0); }, 0);
+  var totalMax = records.reduce(function(s, r) { return s + (r.maxPrice || r.marketValue || 0); }, 0);
+  var totalMed = records.reduce(function(s, r) { return s + (r.marketValue || 0); }, 0);
+  var genres = new Set(records.reduce(function(acc, r) { return acc.concat(r.genres || []); }, []));
+  document.getElementById('stats-bar').innerHTML =
+    '<div class="stat-item"><div class="stat-num">' + total + '</div><div class="stat-label">Dischi</div></div>' +
+    '<div class="stat-item"><div class="stat-num" style="color:var(--green)">&euro;' + totalMed.toLocaleString('it-IT', {maximumFractionDigits:0}) + '</div><div class="stat-label">Valore stimato</div></div>' +
+    '<div class="stat-item"><div class="stat-num" style="font-size:16px"><span style="color:var(--text2)">&euro;' + totalMin.toLocaleString('it-IT', {maximumFractionDigits:0}) + '</span><span style="color:var(--text3);margin:0 6px">&rarr;</span><span style="color:var(--gold)">&euro;' + totalMax.toLocaleString('it-IT', {maximumFractionDigits:0}) + '</span></div><div class="stat-label">Range totale</div></div>' +
+    '<div class="stat-item"><div class="stat-num">' + genres.size + '</div><div class="stat-label">Generi</div></div>';
+}
+
+function renderFilters() {
+  var allGenres = [];
+  records.forEach(function(r) { (r.genres || []).forEach(function(g) { if (allGenres.indexOf(g) < 0) allGenres.push(g); }); });
+  allGenres.sort();
+  var all = ['tutti'].concat(allGenres);
+  document.getElementById('genre-filters').innerHTML = all.map(function(g) {
+    return '<button class="chip ' + (activeGenre === g ? 'active' : '') + '" onclick="setGenre(\'' + g.replace(/'/g, "\\'") + '\')">' + (g === 'tutti' ? 'Tutti' : g) + '</button>';
+  }).join('');
+}
+
+function setGenre(g) { activeGenre = g; renderFilters(); renderGrid(); }
+
+function renderGrid() {
+  var q = document.getElementById('search-input').value.toLowerCase();
+  var list = records.filter(function(r) {
+    var matchGenre = activeGenre === 'tutti' || (r.genres || []).indexOf(activeGenre) >= 0;
+    var matchSearch = !q || (r.title || '').toLowerCase().indexOf(q) >= 0 || (r.artist || '').toLowerCase().indexOf(q) >= 0;
+    return matchGenre && matchSearch;
+  });
+  var el = document.getElementById('vinyl-grid');
+  if (!list.length) {
+    el.innerHTML = '<div class="empty-state"><div class="icon">&#127925;</div><h3>' + (records.length ? 'Nessun risultato' : 'Collezione vuota') + '</h3><p>' + (records.length ? 'Prova a cambiare filtri' : 'Aggiungi il tuo primo disco') + '</p></div>';
+    return;
+  }
+  el.innerHTML = list.map(function(r) {
+    return '<div class="vinyl-card" onclick="openRecord(\'' + r.id + '\')">' +
+      '<div class="cover-wrap">' +
+      (r.cover ? '<img src="' + r.cover + '" alt="" loading="lazy">' : '<div class="cover-placeholder">&#127925;</div>') +
+      '<div class="cover-overlay"><div class="play-icon">&#9654;</div></div>' +
+      '</div>' +
+      '<div class="card-title">' + (r.title || 'Titolo sconosciuto') + '</div>' +
+      '<div class="card-artist">' + (r.artist || '&mdash;') + '</div>' +
+      '<div class="card-meta">' +
+      '<span class="card-year">' + (r.year || '&mdash;') + '</span>' +
+      (r.marketValue ? '<span class="card-value">&euro;' + r.marketValue + '</span>' : '') +
+      '</div></div>';
+  }).join('');
+}
+
+function renderAll() { renderStats(); renderFilters(); renderGrid(); }
+
+function openRecord(id) {
+  var r = records.find(function(x) { return x.id === id; });
+  if (!r) return;
+  var overlay = document.getElementById('modal-overlay');
+  var content = document.getElementById('modal-content');
+  var condOptions = ['', 'Mint (M)', 'Near Mint (NM)', 'Very Good Plus (VG+)', 'Very Good (VG)', 'Good Plus (G+)', 'Good (G)', 'Fair (F)', 'Poor (P)'];
+  var priceRangeHTML = '';
+  if (r.minPrice || r.maxPrice) {
+    priceRangeHTML = '<div class="price-range-box">' +
+      '<div class="price-range-item"><div class="price-range-val" style="color:var(--text2)">&euro;' + (r.minPrice || '&mdash;') + '</div><div class="price-range-label">Min mercato</div></div>' +
+      '<div class="price-range-arrow">&rarr;</div>' +
+      '<div class="price-range-item"><div class="price-range-val" style="color:var(--gold)">&euro;' + (r.maxPrice || '&mdash;') + '</div><div class="price-range-label">Max mercato</div></div>' +
+      '</div>';
+  }
+  var tracklistHTML = '';
+  if (r.tracklist && r.tracklist.length) {
+    tracklistHTML = '<div class="section-title">Tracklist</div><div class="tracklist">' +
+      r.tracklist.map(function(t) {
+        return '<div class="track"><span class="track-pos">' + (t.position || '&middot;') + '</span><span class="track-title">' + t.title + '</span>' + (t.duration ? '<span class="track-dur">' + t.duration + '</span>' : '') + '</div>';
+      }).join('') + '</div>';
+  }
+  var descHTML = r.description
+    ? '<div class="section-title">Note AI</div><div class="description">' + r.description + '</div>'
+    : '<div class="section-title">Note AI</div><button class="btn btn-ghost btn-sm" onclick="generateDescription(\'' + id + '\')">&#10024; Genera descrizione</button><div id="ai-desc-' + id + '"></div>';
+  var condHTML = condOptions.map(function(c) {
+    return '<option value="' + c + '"' + (r.condition === c ? ' selected' : '') + '>' + (c || 'Non specificata') + '</option>';
+  }).join('');
+  content.innerHTML =
+    '<div class="drag-handle"></div>' +
+    '<div class="modal-top-bar"><span class="modal-top-label">Dettaglio</span>' +
+    '<div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="deleteRecord(\'' + id + '\')">&#128465; Elimina</button>' +
+    '<button class="close-btn" onclick="closeModalDirect()">&#10005;</button></div></div>' +
+    '<div class="modal-header">' +
+    '<div class="modal-cover">' + (r.cover ? '<img src="' + r.cover + '" alt="">' : '<div class="modal-cover-placeholder">&#127925;</div>') + '</div>' +
+    '<div class="modal-info"><div class="modal-title">' + (r.title || 'Titolo sconosciuto') + '</div>' +
+    '<div class="modal-artist">' + (r.artist || '&mdash;') + '</div>' +
+    '<div class="modal-tags">' + (r.genres || []).map(function(g) { return '<span class="tag">' + g + '</span>'; }).join('') + (r.format ? '<span class="tag">' + r.format + '</span>' : '') + (r.label ? '<span class="tag">' + r.label + '</span>' : '') + '</div></div></div>' +
+    '<div class="modal-stats">' +
+    '<div class="modal-stat"><div class="modal-stat-val">' + (r.year || '&mdash;') + '</div><div class="modal-stat-label">Anno</div></div>' +
+    '<div class="modal-stat"><div class="modal-stat-val" style="color:var(--green)">' + (r.marketValue ? '&euro;' + r.marketValue : '&mdash;') + '</div><div class="modal-stat-label">Valore medio</div></div>' +
+    '<div class="modal-stat"><div class="modal-stat-val">' + (r.condition || '&mdash;') + '</div><div class="modal-stat-label">Condizione</div></div>' +
+    '</div>' +
+    priceRangeHTML +
+    '<div class="section-title">Condizione</div>' +
+    '<select class="condition-select" onchange="updateCondition(\'' + id + '\', this.value)">' + condHTML + '</select>' +
+    tracklistHTML +
+    descHTML +
+    '<div class="section-title">Note personali</div>' +
+    '<textarea class="notes-input" placeholder="Dove l\'hai trovato, ricordi..." onchange="updateNotes(\'' + id + '\', this.value)">' + (r.notes || '') + '</textarea>';
+  overlay.classList.add('open');
+}
+
+function handleModalClick(e) { if (e.target === document.getElementById('modal-overlay')) closeModalDirect(); }
+function closeModalDirect() { document.getElementById('modal-overlay').classList.remove('open'); }
+function updateCondition(id, val) { var r = records.find(function(x) { return x.id === id; }); if (r) { r.condition = val; sbSave(); } }
+function updateNotes(id, val) { var r = records.find(function(x) { return x.id === id; }); if (r) { r.notes = val; sbSave(); } }
+
+function deleteRecord(id) {
+  if (!confirm('Eliminare questo disco?')) return;
+  records = records.filter(function(x) { return x.id !== id; });
+  sbSave(); renderAll(); closeModalDirect(); toast('Disco eliminato');
+}
+
+async function generateDescription(id) {
+  var r = records.find(function(x) { return x.id === id; });
+  if (!r) return;
+  var el = document.getElementById('ai-desc-' + id);
+  if (el) el.innerHTML = '<div class="loading-state"><div class="spinner"></div> Generazione...</div>';
+  try {
+    var resp = await fetch(API_BASE + '/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artist: r.artist, title: r.title, year: r.year, label: r.label, genres: r.genres, tracklist: r.tracklist })
+    });
+    var data = await resp.json();
+    r.description = data.description;
+    sbSave();
+    if (el) el.innerHTML = '<div class="description">' + r.description + '</div>';
+  } catch(e) {
+    if (el) el.innerHTML = '<span style="color:var(--text3);font-size:13px">Errore nella generazione</span>';
+  }
+}
+
+function openAdd() { document.getElementById('add-panel').classList.add('open'); }
+function handleAddClick(e) { if (e.target === document.getElementById('add-panel')) closeAddPanel(); }
+function closeAddPanel() {
+  document.getElementById('add-panel').classList.remove('open');
+  stopScan();
+  document.getElementById('add-search').value = '';
+  document.getElementById('search-results').innerHTML = '';
+  document.getElementById('scan-results').innerHTML = '';
+  setMethod('search');
+}
+
+function setMethod(m) {
+  document.getElementById('method-search').classList.toggle('active', m === 'search');
+  document.getElementById('method-scan').classList.toggle('active', m === 'scan');
+  document.getElementById('method-search-ui').style.display = m === 'search' ? 'block' : 'none';
+  document.getElementById('method-scan-ui').style.display = m === 'scan' ? 'block' : 'none';
+  if (m === 'scan') startScan(); else stopScan();
+}
+
+function searchDiscogs(q) {
+  clearTimeout(searchTimeout);
+  if (q.length < 2) { document.getElementById('search-results').innerHTML = ''; return; }
+  searchTimeout = setTimeout(async function() {
+    var el = document.getElementById('search-results');
+    el.innerHTML = '<div class="loading-state"><div class="spinner"></div> Ricerca...</div>';
+    try {
+      var r = await fetch(API_BASE + '/api/discogs?query=' + encodeURIComponent(q));
+      var data = await r.json();
+      if (!data.results || !data.results.length) { el.innerHTML = '<p style="color:var(--text3);font-size:13px;padding:8px">Nessun risultato</p>'; return; }
+      searchResultsMap = {};
+      data.results.forEach(function(item) { searchResultsMap[item.id] = item; });
+      el.innerHTML = '<div class="search-results-list">' + data.results.map(function(item) {
+        return '<div class="result-item" onclick="selectResult(' + item.id + ')">' +
+          (item.cover_image ? '<img class="result-thumb" src="' + item.cover_image + '" onerror="this.style.display=\'none\'">' : '<div class="result-thumb" style="background:var(--surface3);display:flex;align-items:center;justify-content:center">&#127925;</div>') +
+          '<div class="result-info"><div class="result-title">' + item.title + '</div>' +
+          '<div class="result-sub">' + (item.year || '') + (item.label ? ' &middot; ' + item.label[0] : '') + (item.genre ? ' &middot; ' + item.genre[0] : '') + '</div></div></div>';
+      }).join('') + '</div>';
+    } catch(e) { el.innerHTML = '<p style="color:var(--text3);font-size:13px;padding:8px">Errore nella ricerca</p>'; }
+  }, 500);
+}
+
 async function selectResult(discogsId) {
-  const preview = (window._searchResults || {})[discogsId] || {};
-  // Show loading in whichever results container is visible
-  const elSearch = document.getElementById('search-results');
-  const elScan = document.getElementById('scan-results');
-  const el = (elScan && elScan.innerHTML) ? elScan : elSearch;
-  if(el) el.innerHTML = '<div class="loading-state"><div class="spinner"></div> Carico i dettagli…</div>';
-try {
-const r = await fetch(`${API_BASE}/api/discogs?releaseId=${discogsId}`);
-    if(!r.ok) throw new Error('HTTP ' + r.status);
-const data = await r.json();
-const record = buildRecord(data, preview);
-addRecord(record);
-closeAddPanel();
-} catch(e) {
-    // Fallback con dati preview
-    const record = buildRecord(null, preview);
+  var preview = searchResultsMap[discogsId] || {};
+  var el = document.getElementById('search-results') || document.getElementById('scan-results');
+  if (el) el.innerHTML = '<div class="loading-state"><div class="spinner"></div> Carico i dettagli...</div>';
+  try {
+    var r = await fetch(API_BASE + '/api/discogs?releaseId=' + discogsId);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var data = await r.json();
+    var record = buildRecord(data, preview);
     addRecord(record);
     closeAddPanel();
-    // Fallback con dati preview se disponibili
-    if(preview && preview.id) {
-      const record = buildRecord(null, preview);
-      addRecord(record);
-      closeAddPanel();
-    } else {
-      toast('Errore nel caricamento del disco', 'error');
-      if(el) el.innerHTML = '<p style="color:var(--text3);font-size:13px;padding:8px">Errore — riprova</p>';
-    }
-}
+  } catch(e) {
+    if (preview && preview.id) { addRecord(buildRecord(null, preview)); closeAddPanel(); }
+    else { toast('Errore nel caricamento', 'error'); }
+  }
 }
 
-@@ -608,8 +620,10 @@ <h3>${records.length ? 'Nessun risultato' : 'Collezione vuota'}</h3>
-const r = await fetch(`${API_BASE}/api/discogs?barcode=${barcode}`);
-const data = await r.json();
-if(data.results?.length) {
-            window._searchResults = window._searchResults || {};
-            data.results.forEach(item => { window._searchResults[item.id] = item; });
-el.innerHTML = '<div class="search-results">' + data.results.map(item => `
-              <div class="result-item" onclick="selectResult(${item.id}, '${encodeURIComponent(JSON.stringify(item))}')">
-              <div class="result-item" onclick="selectResult(${item.id})">
-               ${item.cover_image ? `<img class="result-thumb" src="${item.cover_image}">` : '<div class="result-thumb" style="background:var(--surface3)">🎵</div>'}
-               <div class="result-info">
-                 <div class="result-title">${item.title}</div>
+function buildRecord(detail, preview) {
+  var titleParts = (preview.title || '').split(' - ');
+  var artist = titleParts.length > 1 ? titleParts[0] : (preview.artist || preview.title || '');
+  var title = titleParts.length > 1 ? titleParts.slice(1).join(' - ') : (preview.title || '');
+  var marketValue = null, minPrice = null, maxPrice = null;
+  var stats = (detail && detail.market_stats) || (preview && preview.market_stats);
+  if (stats) {
+    if (stats.lowest_price && stats.lowest_price.value) minPrice = Math.round(stats.lowest_price.value);
+    if (stats.highest_price && stats.highest_price.value) maxPrice = Math.round(stats.highest_price.value);
+    else if (stats.median_price && stats.median_price.value) maxPrice = Math.round(stats.median_price.value);
+    if (stats.median_price && stats.median_price.value) marketValue = Math.round(stats.median_price.value);
+    else if (stats.lowest_price && stats.lowest_price.value) marketValue = Math.round(stats.lowest_price.value);
+    if (minPrice && !maxPrice) maxPrice = minPrice;
+    if (maxPrice && !minPrice) minPrice = maxPrice;
+  }
+  return {
+    id: Date.now().toString(),
+    discogsId: preview.id || (detail && detail.id),
+    title: (detail && detail.title) || title,
+    artist: (detail && detail.artists && detail.artists[0] && detail.artists[0].name) || artist,
+    year: (detail && detail.year) || preview.year,
+    label: (detail && detail.labels && detail.labels[0] && detail.labels[0].name) || (preview.label && preview.label[0]),
+    cover: (detail && detail.images && detail.images[0] && detail.images[0].uri) || preview.cover_image,
+    genres: (detail && detail.genres) || preview.genre || [],
+    styles: (detail && detail.styles) || preview.style || [],
+    format: (detail && detail.formats && detail.formats[0] && detail.formats[0].name) || (preview.format && preview.format[0]),
+    tracklist: (detail && detail.tracklist) || [],
+    marketValue: marketValue,
+    minPrice: minPrice,
+    maxPrice: maxPrice,
+    condition: '',
+    notes: '',
+    description: '',
+    addedAt: new Date().toISOString()
+  };
+}
+
+async function addRecord(record) {
+  records.unshift(record);
+  await sbSave();
+  renderAll();
+  toast((record.title || 'Disco') + ' aggiunto');
+}
+
+async function startScan() {
+  var video = document.getElementById('scanner-video');
+  var btn = document.getElementById('scan-btn');
+  btn.textContent = 'Scansione in corso...';
+  btn.disabled = true;
+  video.classList.add('active');
+  try {
+    var ZXing = window.ZXing;
+    codeReader = new ZXing.BrowserBarcodeReader();
+    codeReader.decodeFromVideoDevice(null, 'scanner-video', async function(result, err) {
+      if (result) {
+        var barcode = result.getText();
+        stopScan();
+        var el = document.getElementById('scan-results');
+        el.innerHTML = '<div class="loading-state"><div class="spinner"></div> Cerco su Discogs...</div>';
+        try {
+          var r = await fetch(API_BASE + '/api/discogs?barcode=' + barcode);
+          var data = await r.json();
+          if (data.results && data.results.length) {
+            searchResultsMap = {};
+            data.results.forEach(function(item) { searchResultsMap[item.id] = item; });
+            el.innerHTML = '<div class="search-results-list">' + data.results.map(function(item) {
+              return '<div class="result-item" onclick="selectResult(' + item.id + ')">' +
+                (item.cover_image ? '<img class="result-thumb" src="' + item.cover_image + '">' : '<div class="result-thumb" style="background:var(--surface3)">&#127925;</div>') +
+                '<div class="result-info"><div class="result-title">' + item.title + '</div>' +
+                '<div class="result-sub">' + (item.year || '') + (item.label ? ' &middot; ' + item.label[0] : '') + '</div></div></div>';
+            }).join('') + '</div>';
+          } else {
+            el.innerHTML = '<p style="color:var(--text3);font-size:13px;padding:8px">Nessun risultato per questo barcode</p>';
+          }
+        } catch(e) { el.innerHTML = '<p style="color:var(--text3);font-size:13px;padding:8px">Errore nella ricerca</p>'; }
+      }
+    });
+  } catch(e) {
+    toast('Fotocamera non disponibile', 'error');
+    stopScan();
+  }
+}
+
+function stopScan() {
+  if (codeReader) { try { codeReader.reset(); } catch(e) {} codeReader = null; }
+  var video = document.getElementById('scanner-video');
+  if (video) video.classList.remove('active');
+  var btn = document.getElementById('scan-btn');
+  if (btn) { btn.textContent = 'Avvia fotocamera'; btn.disabled = false; }
+}
+
+sbLoad().then(function() {
+  renderAll();
+  if (records.length > 0) toast(records.length + ' disc' + (records.length === 1 ? 'o' : 'hi') + ' caricati');
+});
+</script>
+</body>
+</html>
